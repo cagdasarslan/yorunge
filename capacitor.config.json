@@ -1,0 +1,11 @@
+{
+  "appId": "com.yorunge.oyun",
+  "appName": "Yorunge",
+  "webDir": "www",
+  "backgroundColor": "#0A0D19",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "backgroundColor": "#0A0D19"
+  }
+}

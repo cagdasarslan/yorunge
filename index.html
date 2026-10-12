@@ -1,0 +1,559 @@
+<title>Yörünge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=JetBrains+Mono:wght@700&display=swap">
+<style>
+/* Layout: tek ekran oyun — yıldızlı uzay canvas'ı, üstte ince HUD, altta fırlatma rampası (uydu kuyruğu) */
+:root{
+  --space:#0A0D19;      /* uzay zemini */
+  --ink:#E9EDF7;        /* uydu gövdesi, yazılar */
+  --muted:#7C87A6;      /* ikincil yazı */
+  --planet:#E0663A;     /* gezegen gölge tarafı */
+  --planet-hi:#FFB547;  /* gezegen ışık tarafı, motor alevi */
+  --panel:#5B8CFF;      /* güneş panelleri */
+  --fail:#3D0F1C;       /* çarpışma zemini */
+  --win:#0D3A35;        /* yörünge tamam zemini */
+  --f-display:"Unbounded", "Arial Black", system-ui, sans-serif;
+  --f-mono:"JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{
+  background:var(--space);color:var(--ink);
+  transition:background-color .25s ease;
+  overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;
+  -webkit-tap-highlight-color:transparent;
+}
+body.fail{background:var(--fail)}
+body.win{background:var(--win)}
+#stage{position:relative;height:100%;width:100%}
+canvas{display:block;width:100%;height:100%;cursor:pointer}
+#hud{
+  position:absolute;inset:0 0 auto 0;display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:14px 16px;font-family:var(--f-mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+  pointer-events:none;
+}
+#hud .k{color:var(--muted)}
+#hud b{font-family:var(--f-display);font-weight:800;font-size:15px;letter-spacing:.02em;margin-left:6px;font-variant-numeric:tabular-nums}
+#menuBtn{
+  pointer-events:auto;font:inherit;letter-spacing:inherit;text-transform:inherit;color:var(--ink);
+  background:transparent;border:1.5px solid var(--muted);border-radius:999px;padding:5px 12px;cursor:pointer;
+}
+button:focus-visible{outline:2px solid var(--planet-hi);outline-offset:3px}
+#msg{
+  position:absolute;left:16px;right:16px;top:52px;text-align:center;pointer-events:none;
+  font-family:var(--f-display);font-weight:500;font-size:13px;letter-spacing:.05em;color:var(--muted);
+  text-wrap:balance;
+}
+body.fail #msg, body.win #msg{color:var(--ink)}
+body.menu #hud, body.menu #msg{display:none}
+
+/* Ana menü */
+#menu{
+  position:absolute;left:0;right:0;bottom:0;top:58%;
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:12px;
+  padding:4px 16px 28px;
+}
+#menu h1{
+  margin:0 0 2px;font-family:var(--f-display);font-weight:800;font-size:clamp(28px,8vw,40px);
+  letter-spacing:.14em;text-transform:uppercase;text-align:center;
+}
+#menu .tag{
+  font-family:var(--f-mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);
+  margin-bottom:6px;text-align:center;
+}
+#menu .tag b{color:var(--planet-hi);font-family:var(--f-display);font-weight:800;letter-spacing:.02em;font-size:13px}
+.mbtn{
+  width:100%;max-width:300px;min-height:52px;border-radius:999px;cursor:pointer;
+  font-family:var(--f-display);font-weight:500;font-size:15px;letter-spacing:.03em;
+  border:1.5px solid var(--muted);background:transparent;color:var(--ink);
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  transition:transform .12s ease;
+}
+.mbtn:active{transform:scale(.97)}
+.mbtn.primary{background:var(--planet-hi);border-color:var(--planet-hi);color:var(--space);font-weight:800}
+.mbtn small{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;opacity:.7;text-transform:uppercase}
+.row{display:flex;gap:10px;width:100%;max-width:300px}
+.row .mbtn{flex:1;min-width:0;font-size:13px;min-height:46px}
+#menu.pick{top:0;padding-top:72px;background:var(--space)}
+#menu.pick #levels{max-height:calc(100% - 150px)}
+#levels{
+  display:grid;grid-template-columns:repeat(5,1fr);gap:8px;width:100%;max-width:300px;
+  overflow-y:auto;padding:2px;
+}
+#levels button{
+  aspect-ratio:1;max-width:100%;border-radius:50%;border:1.5px solid var(--muted);background:transparent;color:var(--ink);
+  font-family:var(--f-mono);font-weight:700;font-size:14px;cursor:pointer;font-variant-numeric:tabular-nums;
+}
+#levels button.done{background:var(--planet-hi);border-color:var(--planet-hi);color:var(--space)}
+#levels button:disabled{opacity:.25;cursor:default}
+@media (prefers-reduced-motion: reduce){.mbtn{transition:none}}
+</style>
+
+<div id="stage">
+  <canvas id="c" aria-label="Yörünge oyun alanı: uydu fırlatmak için dokun"></canvas>
+  <div id="hud">
+    <span><span class="k">Seviye</span><b id="lvl">1</b></span>
+    <button id="menuBtn" type="button">Menü</button>
+    <span><span class="k">En iyi</span><b id="best">0</b></span>
+  </div>
+  <div id="msg">Ekrana dokun, uyduyu fırlat</div>
+
+  <div id="menu" hidden>
+    <div id="mainPanel" style="display:contents">
+      <h1>Yörünge</h1>
+      <div class="tag">En iyi seviye <b id="mBest">0</b></div>
+      <button class="mbtn primary" id="mPlay" type="button">Fırlat</button>
+      <div class="row">
+        <button class="mbtn" id="mPick" type="button">Seviye seç</button>
+        <button class="mbtn" id="mSound" type="button">Ses açık</button>
+      </div>
+      <button class="mbtn" id="mNew" type="button" hidden>Yeni oyun <small>Seviye 1</small></button>
+    </div>
+    <div id="pickPanel" style="display:contents" hidden>
+      <div class="tag">Açılmış seviyeler</div>
+      <div id="levels"></div>
+      <button class="mbtn" id="mBack" type="button">Geri</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+const TAU = Math.PI * 2;
+const cvs = document.getElementById("c");
+const ctx = cvs.getContext("2d");
+const $ = id => document.getElementById(id);
+const $lvl = $("lvl"), $best = $("best"), $msg = $("msg"), $mute = $("mSound");
+const css = getComputedStyle(document.documentElement);
+const tok = n => css.getPropertyValue(n).trim();
+const C = { ink: tok("--ink"), space: tok("--space"), muted: tok("--muted"), planet: tok("--planet"),
+            planetHi: tok("--planet-hi"), panel: tok("--panel") };
+const FD = tok("--f-display"), FM = tok("--f-mono");
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+};
+
+function rng(seed) {
+  return () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const angDiff = (a, b) => { let d = (a - b) % TAU; if (d < 0) d += TAU; return d > Math.PI ? TAU - d : d; };
+
+/* ---------- Geometri ---------- */
+let W = 0, H = 0, G = {}, stars = [];
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const b = cvs.getBoundingClientRect();
+  W = b.width; H = b.height;
+  cvs.width = Math.round(W * dpr); cvs.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const R = Math.min(W * 0.13, H * 0.085);
+  const L = R * 1.55;
+  const r = Math.max(8, R * 0.18);
+  const cy = H * 0.37;
+  G = { cx: W / 2, cy, R, L, r, orbit: R + L,
+        qy: Math.max(cy + R + L + r * 5, H * 0.69), qgap: r * 2.9,
+        minAng: 2 * Math.asin(Math.min(1, r / (R + L))) };
+  const rand = rng(42);
+  stars = Array.from({ length: Math.round(W * H / 4200) }, () =>
+    ({ x: rand() * W, y: rand() * H, s: rand() * 1.3 + 0.3, p: rand() * TAU }));
+}
+
+/* ---------- Gezegenler: her 10 seviyede bir değişir ----------
+   g = yüzey yer çekimi (m/s²). Uydu uçuş hızı g / 9.81 ile ölçeklenir (Dünya = 1x).
+   Düşük g → yavaş uydu → dokunuş ile varış arasında daha uzun gecikme → daha zor. */
+const EARTH_G = 9.81;
+const WORLDS = [
+  { name: "Dünya",   g: 9.81,  lo: "#1E5BB8", hi: "#5FA8F0", txt: "#F4F7FF", look: "earth" },
+  { name: "Neptün",  g: 11.15, lo: "#1C3FA8", hi: "#4C7BEA", txt: "#F4F7FF", look: "bands" },
+  { name: "Satürn",  g: 10.44, lo: "#C9A25A", hi: "#F1D99A", txt: "#0A0D19", look: "bands", rings: true },
+  { name: "Venüs",   g: 8.87,  lo: "#C98A3A", hi: "#F3D08A", txt: "#0A0D19", look: "haze" },
+  { name: "Uranüs",  g: 8.69,  lo: "#3E9FB2", hi: "#A6E6EE", txt: "#0A0D19", look: "haze", rings: true, thin: true },
+  { name: "Jüpiter", g: 24.79, lo: "#B5703F", hi: "#EBC79A", txt: "#0A0D19", look: "spot" },
+  { name: "Mars",    g: 3.71,  lo: "#A83A22", hi: "#E0663A", txt: "#0A0D19", look: "craters" },
+  { name: "Merkür",  g: 3.70,  lo: "#6F6A68", hi: "#B9B3AE", txt: "#0A0D19", look: "craters" },
+  { name: "Plüton",  g: 0.62,  lo: "#9C7A5E", hi: "#E3CBB0", txt: "#0A0D19", look: "heart" }
+];
+const worldFor = n => WORLDS[Math.min(Math.floor((n - 1) / 10), WORLDS.length - 1)];
+const fmtG = g => g.toFixed(2).replace(".", ",");
+
+/* ---------- LevelManager ---------- */
+const LevelManager = {
+  config(n) {
+    const rand = rng(n * 9973 + 17);
+    const shots = Math.min(5 + Math.floor(n * 0.7), 18);
+    const preCount = Math.min(1 + Math.floor(n / 2), 12);
+    const speed = Math.min(1.45 + n * 0.07, 3.6);
+    let mode = "constant";
+    if (n >= 15) mode = "chaos";
+    else if (n >= 10) mode = "reverse";
+    else if (n >= 5) mode = n % 2 ? "wobble" : "constant";
+    const flipMin = Math.max(0.9, 2.4 - n * 0.05), flipMax = flipMin + 1.6;
+    const off = rand() * TAU, step = TAU / preCount;
+    const pre = [];
+    for (let i = 0; i < preCount; i++) pre.push(off + i * step + (rand() - 0.5) * step * 0.3);
+    return { n, shots, pre, speed, mode, flipMin, flipMax, dir: rand() < 0.5 ? 1 : -1, rand, world: worldFor(n) };
+  }
+};
+
+/* ---------- Planet (eski Wheel): döner, uyduları yerel açıyla tutar ---------- */
+class Planet {
+  constructor(cfg) {
+    this.cfg = cfg; this.rot = 0; this.t = 0; this.dir = cfg.dir;
+    this.nextFlip = cfg.flipMin + cfg.rand() * (cfg.flipMax - cfg.flipMin);
+    this.sats = cfg.pre.map(a => ({ local: a, num: null }));
+  }
+  update(dt) {
+    const c = this.cfg; this.t += dt;
+    let s = c.speed;
+    if (c.mode === "wobble" || c.mode === "chaos") s *= 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(this.t * 1.7));
+    if ((c.mode === "reverse" || c.mode === "chaos") && this.t >= this.nextFlip) {
+      this.dir *= -1;
+      this.nextFlip = this.t + c.flipMin + c.rand() * (c.flipMax - c.flipMin);
+    }
+    this.rot += this.dir * s * dt;
+  }
+  pos(p) { const a = p.local + this.rot; return [G.cx + Math.cos(a) * G.orbit, G.cy + Math.sin(a) * G.orbit, a]; }
+  hitsAt(worldAng) { return this.sats.some(p => angDiff(p.local + this.rot, worldAng) < G.minAng); }
+  attach(sat, worldAng) { sat.local = worldAng - this.rot; this.sats.push(sat); }
+}
+
+/* ---------- Patlama parçacıkları ---------- */
+const FX = {
+  parts: [],
+  burst(x, y) {
+    for (let i = 0; i < 34; i++) {
+      const a = Math.random() * TAU, v = 60 + Math.random() * 260;
+      this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.6 + Math.random() * 0.6,
+                        c: [C.planetHi, C.ink, C.panel][i % 3] });
+    }
+  },
+  update(dt) {
+    for (const p of this.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.97; p.vy *= 0.97; p.life -= dt; }
+    this.parts = this.parts.filter(p => p.life > 0);
+  },
+  draw() {
+    for (const p of this.parts) {
+      ctx.globalAlpha = Math.min(1, p.life * 1.6); ctx.fillStyle = p.c;
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+    }
+    ctx.globalAlpha = 1;
+  }
+};
+
+/* ---------- Ses ---------- */
+const Sound = {
+  ac: null, on: store.get("aa-sound", true),
+  init() { if (!this.ac) { try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } },
+  tone(f, d, type = "sine", v = 0.08, at = 0, slide) {
+    if (!this.on || !this.ac) return;
+    const t = this.ac.currentTime + at, o = this.ac.createOscillator(), g = this.ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + d);
+    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g).connect(this.ac.destination); o.start(t); o.stop(t + d);
+  },
+  shoot() { this.tone(220, 0.18, "triangle", 0.06, 0, 660); },
+  stick() { this.tone(1320, 0.08, "sine", 0.06); this.tone(1760, 0.1, "sine", 0.04, 0.05); },
+  fail()  { this.tone(180, 0.5, "sawtooth", 0.08, 0, 40); },
+  win()   { this.tone(523, 0.14); this.tone(784, 0.14, "sine", 0.08, 0.1); this.tone(1046, 0.25, "sine", 0.08, 0.2); }
+};
+function renderMute() { $mute.textContent = Sound.on ? "Ses açık" : "Ses kapalı"; }
+$mute.addEventListener("click", () => { Sound.init(); Sound.on = !Sound.on; store.set("aa-sound", Sound.on); renderMute(); Sound.stick(); });
+renderMute();
+
+/* ---------- Ana menü ---------- */
+const Menu = {
+  open() {
+    const saved = store.get("aa-level", 1);
+    $("mBest").textContent = GM.best;
+    $("mPlay").innerHTML = saved > 1 ? `Devam et <small>Seviye ${saved}</small>` : "Fırlat";
+    $("mNew").hidden = saved <= 1;
+    this.panel("main");
+    $("menu").hidden = false;
+  },
+  close() { $("menu").hidden = true; },
+  panel(which) {
+    $("mainPanel").hidden = which !== "main";
+    $("pickPanel").hidden = which !== "pick";
+    $("menu").classList.toggle("pick", which === "pick");
+    if (which === "pick") this.renderLevels();
+  },
+  renderLevels() {
+    const box = $("levels"), unlocked = GM.best + 1, max = Math.max(20, Math.ceil(unlocked / 5) * 5);
+    box.innerHTML = "";
+    for (let n = 1; n <= max; n++) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = n; b.id = "lv" + n;
+      const w = worldFor(n);
+      b.setAttribute("aria-label", `Seviye ${n}, ${w.name}`); b.title = w.name;
+      b.style.borderColor = w.hi;
+      if (n <= GM.best) { b.className = "done"; b.style.background = w.hi; }
+      if (n > unlocked) b.disabled = true;
+      else b.addEventListener("click", () => this.play(n));
+      box.appendChild(b);
+    }
+  },
+  play(level) { Sound.init(); this.close(); GM.start(level); }
+};
+$("mPlay").addEventListener("click", () => Menu.play(store.get("aa-level", 1)));
+$("mNew").addEventListener("click", () => Menu.play(1));
+$("mPick").addEventListener("click", () => Menu.panel("pick"));
+$("mBack").addEventListener("click", () => Menu.panel("main"));
+$("menuBtn").addEventListener("pointerdown", e => e.stopPropagation());
+$("menuBtn").addEventListener("click", () => GM.showMenu());
+
+/* ---------- GameManager ---------- */
+const GM = {
+  state: "play", level: 1, best: store.get("aa-best", 0),
+  planet: null, queue: [], flying: [], failSat: null, shift: 0, stateT: 0, shake: 0, shots: 0, clock: 0,
+
+  start(level) {
+    this.level = Math.max(1, level | 0);
+    const cfg = LevelManager.config(this.level);
+    this.planet = new Planet(cfg);
+    this.queue = Array.from({ length: cfg.shots }, (_, i) => cfg.shots - i);
+    this.flying = []; this.failSat = null; this.shift = 0; this.shots = 0; FX.parts = [];
+    this.setState("play");
+    $lvl.textContent = this.level; $best.textContent = this.best;
+    const w = cfg.world, gTxt = `${w.name} · yer çekimi ${fmtG(w.g)} m/s²`;
+    $msg.textContent = this.level === 1 ? `${gTxt}. Ekrana dokun, uyduyu fırlat`
+      : (this.level - 1) % 10 === 0 ? `Yeni gezegen: ${gTxt}`
+      : `${cfg.shots} uydu · ${w.name}`;
+    store.set("aa-level", this.level);
+  },
+  showMenu() {
+    const cfg = LevelManager.config(8);
+    cfg.mode = "constant"; cfg.speed = 0.6; cfg.world = worldFor(store.get("aa-level", 1));
+    this.planet = new Planet(cfg);
+    this.queue = []; this.flying = []; this.failSat = null; FX.parts = [];
+    this.setState("menu");
+    Menu.open();
+  },
+  setState(s) { this.state = s; this.stateT = 0; document.body.className = s === "play" ? "" : s; },
+
+  tap() {
+    Sound.init();
+    if (this.state === "menu") return;
+    if (this.state === "play") {
+      if (!this.queue.length) return;
+      this.flying.push({ num: this.queue.shift(), y: G.qy });
+      this.shift = G.qgap; this.shots++;
+      if (this.shots === 1) $msg.textContent = "";
+      Sound.shoot();
+    } else if (this.state === "fail" && this.stateT > 0.45) this.start(this.level);
+    else if (this.state === "win" && this.stateT > 0.25) this.start(this.level + 1);
+  },
+
+  fail(sat) {
+    this.failSat = sat; this.flying = [];
+    FX.burst(G.cx, sat.y);
+    this.setState("fail"); this.shake = reduceMotion ? 0 : 1;
+    $msg.textContent = "Uydular çarpıştı. Tekrar denemek için dokun";
+    Sound.fail();
+  },
+  win() {
+    this.setState("win");
+    if (this.level > this.best) { this.best = this.level; store.set("aa-best", this.best); $best.textContent = this.best; }
+    $msg.textContent = `Seviye ${this.level} tamam. Yörünge dolu`;
+    Sound.win();
+  },
+
+  update(dt) {
+    this.clock += dt; this.stateT += dt;
+    this.shake = Math.max(0, this.shake - dt * 3);
+    FX.update(dt);
+    if (this.state === "menu") { this.planet.update(dt); return; }
+    if (this.state === "win" && this.stateT > 1.2) { this.start(this.level + 1); return; }
+    if (this.state === "fail") return;
+    this.planet.update(this.state === "win" ? dt * 1.8 : dt);
+    this.shift *= Math.pow(0.0005, dt);
+    if (this.state !== "play") return;
+
+    const speed = H * 2.4 * (this.planet.cfg.world.g / EARTH_G), dockY = G.cy + G.orbit, maxStep = G.r * 0.5;
+    for (let i = 0; i < this.flying.length; i++) {
+      const f = this.flying[i];
+      let left = speed * dt;
+      while (left > 0) {                               // alt adım: hızlı uydu diğerlerinin içinden geçmesin
+        const s = Math.min(maxStep, left); left -= s; f.y -= s;
+        if (f.y <= dockY) {
+          f.y = dockY;
+          if (this.planet.hitsAt(Math.PI / 2)) return this.fail(f);
+          this.planet.attach({ num: f.num }, Math.PI / 2);
+          this.flying.splice(i--, 1); Sound.stick();
+          break;
+        }
+        if (f.y - dockY < G.r * 2) {
+          for (const p of this.planet.sats) {
+            const [hx, hy] = this.planet.pos(p);
+            if (hy > G.cy && (hx - G.cx) ** 2 + (hy - f.y) ** 2 < (2 * G.r) ** 2) return this.fail(f);
+          }
+        }
+      }
+    }
+    if (!this.queue.length && !this.flying.length) this.win();
+  },
+
+  draw() {
+    ctx.clearRect(0, 0, W, H);
+    drawStars(this.clock);
+    const { cx, cy, R, r, orbit } = G, pl = this.planet;
+    const sx = this.shake ? (Math.random() - 0.5) * 12 * this.shake : 0;
+    ctx.save(); ctx.translate(sx, 0);
+
+    // yörünge çizgisi
+    ctx.strokeStyle = C.muted; ctx.globalAlpha = 0.22; ctx.lineWidth = 1; ctx.setLineDash([2, 6]);
+    ctx.beginPath(); ctx.arc(cx, cy, orbit, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+
+    // bağlantı halatları + uydular
+    ctx.strokeStyle = C.ink; ctx.lineWidth = Math.max(1, r * 0.12); ctx.globalAlpha = 0.45;
+    for (const p of pl.sats) {
+      const [hx, hy] = pl.pos(p);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(hx, hy); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    drawPlanet(pl.cfg.world, cx, cy, R, pl.rot, this.state === "menu" ? "" : this.level, this.state === "win");
+    for (const p of pl.sats) { const [hx, hy, a] = pl.pos(p); sat(hx, hy, a, p.num); }
+
+    // uçan uydular (motor alevi ile)
+    for (const f of this.flying) { flame(cx, f.y); sat(cx, f.y, Math.PI / 2, f.num); }
+
+    // fırlatma rampası
+    if (this.state !== "menu") {
+      for (let i = 0; i < this.queue.length; i++) {
+        const y = G.qy + i * G.qgap + this.shift;
+        if (y > H + r) break;
+        sat(cx, y, Math.PI / 2, this.queue[i], false, i === 0 ? 1 : 0.55);
+      }
+    }
+    ctx.restore();
+    FX.draw();
+  }
+};
+
+function drawStars(t) {
+  for (const s of stars) {
+    ctx.globalAlpha = reduceMotion ? 0.6 : 0.35 + 0.35 * Math.sin(t * 1.5 + s.p);
+    ctx.fillStyle = C.ink; ctx.fillRect(s.x, s.y, s.s, s.s);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function rings(w, x, y, R, front) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.32);
+  ctx.strokeStyle = w.hi; ctx.globalAlpha = front ? 0.7 : 0.35;
+  ctx.lineWidth = R * (w.thin ? 0.06 : 0.16);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, R * 1.75, R * 0.42, 0, front ? 0 : Math.PI, front ? Math.PI : TAU);
+  ctx.stroke(); ctx.restore(); ctx.globalAlpha = 1;
+}
+
+function drawPlanet(w, x, y, R, rot, label, glow) {
+  // atmosfer
+  ctx.fillStyle = w.hi; ctx.globalAlpha = glow ? 0.3 : 0.12;
+  ctx.beginPath(); ctx.arc(x, y, R * 1.18, 0, TAU); ctx.fill(); ctx.globalAlpha = 1;
+  if (w.rings) rings(w, x, y, R, false);
+  // gövde
+  const g = ctx.createRadialGradient(x - R * 0.4, y - R * 0.4, R * 0.1, x, y, R);
+  g.addColorStop(0, w.hi); g.addColorStop(1, w.lo);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill();
+  // gezegenle birlikte dönen yüzey detayları
+  ctx.save(); ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.clip();
+  ctx.translate(x, y); ctx.rotate(rot);
+  const blob = (bx, by, br) => { ctx.beginPath(); ctx.arc(bx * R, by * R, br * R, 0, TAU); ctx.fill(); };
+  if (w.look === "earth") {
+    ctx.fillStyle = "#3FA35B"; ctx.globalAlpha = 0.9;
+    [[-0.35, -0.25, 0.28], [-0.15, -0.05, 0.2], [0.45, 0.2, 0.24], [0.3, 0.45, 0.16], [-0.3, 0.55, 0.12]].forEach(b => blob(...b));
+    ctx.fillStyle = "#FFFFFF"; ctx.globalAlpha = 0.7;
+    ctx.fillRect(-R, -R, R * 2, R * 0.12); ctx.fillRect(-R, R * 0.9, R * 2, R * 0.1);
+  } else if (w.look === "bands" || w.look === "spot" || w.look === "haze") {
+    const strips = w.look === "haze" ? [[-0.5, 0.3], [0.25, 0.35]] :
+      [[-0.75, 0.12], [-0.45, 0.16], [-0.1, 0.1], [0.15, 0.18], [0.5, 0.12]];
+    ctx.fillStyle = C.space; ctx.globalAlpha = w.look === "haze" ? 0.08 : 0.16;
+    for (const [sy, sh] of strips) ctx.fillRect(-R, sy * R, R * 2, sh * R);
+    if (w.look === "spot") {
+      ctx.fillStyle = "#C4462E"; ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.ellipse(R * 0.3, R * 0.24, R * 0.22, R * 0.12, 0, 0, TAU); ctx.fill();
+    }
+  } else if (w.look === "craters") {
+    ctx.fillStyle = C.space; ctx.globalAlpha = 0.16;
+    [[-0.45, 0.05, 0.16], [0.4, -0.15, 0.11], [0.15, 0.55, 0.13], [-0.1, -0.7, 0.08], [0.55, 0.45, 0.07]].forEach(b => blob(...b));
+  } else if (w.look === "heart") {
+    ctx.fillStyle = "#F7EEE2"; ctx.globalAlpha = 0.85;
+    blob(-0.18, 0.05, 0.22); blob(0.18, 0.05, 0.22);
+    ctx.beginPath(); ctx.moveTo(-0.38 * R, 0.13 * R); ctx.lineTo(0.38 * R, 0.13 * R); ctx.lineTo(0, 0.6 * R); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = C.space; ctx.globalAlpha = 0.14; blob(-0.5, -0.45, 0.12); blob(0.5, -0.3, 0.09);
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+  if (w.rings) rings(w, x, y, R, true);
+  if (label !== "") {
+    ctx.fillStyle = w.txt; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `800 ${Math.round(R * (label > 99 ? 0.5 : 0.62))}px ${FD}`;
+    ctx.fillText(label, x, y + R * 0.04);
+  }
+}
+
+// Uydu: ortada numaralı gövde, yörüngeye teğet iki güneş paneli. Çarpışma yarıçapı G.r içinde kalır.
+function sat(x, y, ang, num, hot, alpha = 1) {
+  const r = G.r, b = r * 0.6;
+  ctx.globalAlpha = alpha;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  ctx.fillStyle = C.panel;
+  ctx.fillRect(-r * 0.3, -r, r * 0.6, r - b * 0.95);
+  ctx.fillRect(-r * 0.3, b * 0.95, r * 0.6, r - b * 0.95);
+  ctx.strokeStyle = C.space; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(0, -b); ctx.moveTo(0, b); ctx.lineTo(0, r); ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(x, y, b, 0, TAU); ctx.fill();
+  if (hot) { ctx.strokeStyle = C.planetHi; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke(); }
+  if (num != null) {
+    ctx.fillStyle = C.space; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `700 ${Math.round(b * (num > 9 ? 1.0 : 1.2))}px ${FM}`;
+    ctx.fillText(num, x, y + b * 0.06);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function flame(x, y) {
+  const r = G.r, len = r * (1.6 + Math.random() * 0.8);
+  const g = ctx.createLinearGradient(x, y + r * 0.4, x, y + r * 0.4 + len);
+  g.addColorStop(0, C.planetHi); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(x - r * 0.35, y + r * 0.4); ctx.lineTo(x + r * 0.35, y + r * 0.4); ctx.lineTo(x, y + r * 0.4 + len); ctx.closePath(); ctx.fill();
+}
+
+/* ---------- Girdi ve döngü ---------- */
+cvs.addEventListener("pointerdown", e => { e.preventDefault(); GM.tap(); });
+window.addEventListener("keydown", e => {
+  if (GM.state === "menu") { if (e.code === "Escape") Menu.panel("main"); return; }
+  if (e.code === "Escape") { GM.showMenu(); return; }
+  if (e.code === "Space" || e.code === "Enter") { e.preventDefault(); GM.tap(); }
+});
+window.addEventListener("resize", resize);
+
+let last = 0;
+function frame(t) {
+  const dt = Math.min(0.05, (t - (last || t)) / 1000); last = t;
+  GM.update(dt); GM.draw();
+  requestAnimationFrame(frame);
+}
+
+function boot(data) {
+  resize();
+  if (data && data.level) GM.start(data.level); else GM.showMenu();
+  requestAnimationFrame(frame);
+}
+window.claude?.hot?.snapshot?.(() => ({ level: GM.level }));
+window.claude?.hot?.ready ? window.claude.hot.ready(boot) : boot(window.claude?.hot?.data ?? {});
+})();
+</script>
